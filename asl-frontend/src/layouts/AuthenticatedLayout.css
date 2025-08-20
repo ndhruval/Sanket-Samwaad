@@ -1,0 +1,16 @@
+.authenticated-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main-content-wrapper {
+  flex-grow: 1;
+  width: 100%;
+  margin-left: 0; /* No margin needed for temporary overlay menu */
+  transition: margin-left 0.3s ease-in-out; /* Smooth transition for sidebar toggle */
+}
+
+.main-content {
+  padding: 20px;
+  min-height: calc(100vh - 64px); /* Account for navbar height */
+}
