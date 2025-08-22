@@ -1,17 +1,18 @@
-
-
 # --- All Imports Go Here ---
+import os
+import re
+import time
+import random
+import subprocess
+from datetime import timedelta, datetime
+
 from flask import Flask, request, jsonify, send_from_directory
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-import os
-from datetime import timedelta, datetime
-import re
-import subprocess
-import time
-import random
+from sqlalchemy.sql.expression import func
+from itsdangerous import URLSafeTimedSerializer
 
 # Import necessary API libraries
 from googleapiclient.discovery import build
@@ -20,23 +21,24 @@ import imageio_ffmpeg
 
 # --- App and Configuration ---
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = 'your-super-secret-key-that-is-long'
+app.config['JWT_SECRET_KEY'] = 'nisthu'
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['OUTPUT_FOLDER'] = 'outputs'
-app.config['UPLOAD_FOLDER'] = 'profile_pics'
-app.config['YOUTUBE_API_KEY'] = 'PAIzaSyCo8Lt1QpED3nl48r7BVSTN7O8FZRekz2U'
-app.config['PLAYLIST_ID'] = 'PLMN7QCuj6dfaUwmtdkdKhINGZzyGwp7Q1'
-aai.settings.api_key = "418a3615936e4a98ab8a83b669935338"
+app.config['UPLOAD_FOLDER'] = 'uploads'
+# Add placeholders for YouTube API - replace with your actual keys
+app.config['YOUTUBE_API_KEY'] = 'YOUR_YOUTUBE_API_KEY_HERE'
+app.config['PLAYLIST_ID'] = 'YOUR_YOUTUBE_PLAYLIST_ID_HERE'
+aai.settings.api_key = "c4b256a029cc4f75aa3cb957842ce756"
 
-# --- Correct Initializations for a Single-File App ---
+# --- Global Initializations ---
 db = SQLAlchemy(app)
-CORS(app) # Enable CORS for all routes
+CORS(app)
 jwt = JWTManager(app)
-
-# --- Get the path to the self-contained ffmpeg executable ---
+s = URLSafeTimedSerializer(app.config['JWT_SECRET_KEY'])
 ffmpeg_executable = imageio_ffmpeg.get_ffmpeg_exe()
+SIGN_MAP = {letter: os.path.join('asl_gifs', f"{letter}.gif") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}
 
 # --- Database Models ---
 class User(db.Model):
@@ -125,13 +127,21 @@ def seed_database():
 # --- API Routes ---
 @app.route('/api/signup', methods=['POST'])
 def signup():
-    data = request.get_json()
-    name = data.get('name')
-    if not name: return jsonify({'error': 'Name is required'}), 400
-    if User.query.filter_by(email=data.get('email')).first():
-        return jsonify({'error': 'Email already exists'}), 409
-    hashed_password = generate_password_hash(data.get('password'))
-    new_user = User(email=data.get('email'), password=hashed_password, name=name)
+    name = request.form.get('name')
+    email = request.form.get('email')
+    password = request.form.get('password')
+    if not name or not email or not password:
+        return jsonify({'error': 'Missing name, email, or password'}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': 'Email address already in use'}), 409
+    hashed_password = generate_password_hash(password)
+    new_user = User(email=email, password=hashed_password, name=name)
+    if 'profile_pic' in request.files:
+        file = request.files['profile_pic']
+        if file.filename != '':
+            filename = f"user_{datetime.utcnow().timestamp()}_{file.filename}"
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            new_user.profile_image_url = filename
     db.session.add(new_user)
     db.session.commit()
     return jsonify({'message': 'User created successfully'}), 201
@@ -210,7 +220,6 @@ def update_progress():
 @app.route("/api/text-to-sign", methods=['POST'])
 @jwt_required()
 def text_to_sign_route():
-    SIGN_MAP = {letter: os.path.join('asl_gifs', f"{letter}.gif") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}
     data = request.get_json()
     text_to_convert = data.get('text')
     if not text_to_convert: return jsonify({"error": "No text provided"}), 400
@@ -239,58 +248,67 @@ def speech_to_sign_route():
         return jsonify({"error": f"Failed to process audio: {e}"}), 500
     finally:
         if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
-    SIGN_MAP = {letter: os.path.join('asl_gifs', f"{letter}.gif") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}
     os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
     video_filename, message = create_asl_video(recognized_text, SIGN_MAP, app.config['OUTPUT_FOLDER'])
     if not video_filename: return jsonify({"error": message}), 400
     return jsonify({"status": "success", "recognized_text": recognized_text, "video_url": f"/videos/{video_filename}"})
 
-# In your app.py file, add these two new routes
-# In your app.py file, add these two new routes
-
-# This route generates a new random question
+# --- Quiz API Routes ---
 @app.route('/api/quiz/question', methods=['GET'])
 @jwt_required()
 def get_quiz_question():
-    # This logic assumes you have a Word model and seeded database
-    all_words = Word.query.order_by(db.func.random()).limit(4).all()
-    if len(all_words) < 4:
-        return jsonify({"error": "Not enough words in the dictionary for a quiz."}), 404
-    
-    correct_word = all_words[0]
-    options = [word.text for word in all_words]
-    random.shuffle(options)
-    
-    # You would generate the video here and get the filename
-    # For now, let's return a placeholder video_url
-    video_url = "/videos/placeholder.mp4" # Replace with real video generation
-    
-    return jsonify({
-        "video_url": video_url,
-        "options": options,
-        "correct_answer": correct_word.text # Send correct answer for verification
-    })
+    try:
+        correct_word_obj = Word.query.order_by(func.random()).first()
+        if not correct_word_obj:
+            return jsonify({'error': 'No words available for the quiz.'}), 500
+        correct_answer = correct_word_obj.text
+        incorrect_words = Word.query.filter(Word.text != correct_answer).order_by(func.random()).limit(3).all()
+        options = [w.text for w in incorrect_words] + [correct_answer]
+        random.shuffle(options)
+        video_filename, message = create_asl_video(correct_answer, SIGN_MAP, app.config['OUTPUT_FOLDER'])
+        if not video_filename:
+            raise IOError(f"Video file generation failed: {message}")
+        video_url = f"/videos/{video_filename}"
+        question_token = s.dumps(correct_answer, salt='quiz-answer')
+        return jsonify({
+            'video_url': video_url,
+            'options': options,
+            'question_id': question_token
+        })
+    except Exception as e:
+        app.logger.error(f"Error generating quiz question: {e}")
+        return jsonify({'error': 'Could not generate quiz question. Please try again.'}), 500
 
-# This route verifies the user's answer
 @app.route('/api/quiz/verify', methods=['POST'])
 @jwt_required()
-def verify_answer():
+def verify_quiz_answer():
     data = request.get_json()
-    selected_answer = data.get('answer')
-    correct_answer = data.get('correct_answer')
-
-    is_correct = selected_answer == correct_answer
-    
+    user_answer = data.get('answer')
+    question_token = data.get('question_id')
+    if not all([user_answer, question_token]):
+        return jsonify({'error': 'Missing answer or question ID.'}), 400
+    try:
+        correct_answer = s.loads(question_token, salt='quiz-answer', max_age=300)
+    except Exception:
+        return jsonify({'error': 'This question has expired. Please try the next one.'}), 400
+    is_correct = (user_answer == correct_answer)
+    feedback = "Correct!" if is_correct else f"Incorrect. The correct answer was {correct_answer}"
     return jsonify({
         'correct': is_correct,
-        'feedback': 'Correct!' if is_correct else f'Incorrect. The correct answer was {correct_answer}'
+        'feedback': feedback,
+        'correct_answer': correct_answer
     })
 
-
+# --- Static File Serving Routes ---
 @app.route('/profile_pics/<filename>')
 def serve_profile_picture(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+@app.route('/videos/<filename>')
+def serve_video(filename):
+    return send_from_directory(app.config['OUTPUT_FOLDER'], filename)
+
+# --- Main Execution ---
 if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     with app.app_context():

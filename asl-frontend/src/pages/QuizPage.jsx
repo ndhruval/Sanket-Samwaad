@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
   Typography, 
@@ -20,8 +21,6 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-
-const BACKEND_URL = 'http://127.0.0.1:5000';
 
 // Styled components
 const StyledContainer = styled(Container)(({ theme }) => ({
@@ -118,30 +117,36 @@ const OptionsContainer = styled(Box)(({ theme }) => ({
   padding: theme.spacing(4),
 }));
 
-const OptionButton = styled(Button)(({ theme, $iscorrect, $isselected, $isanswered }) => ({
+const OptionButton = styled(Button, {
+  // This prevents the custom props from being passed to the DOM element
+  shouldForwardProp: (prop) => 
+    prop !== '$iscorrect' && 
+    prop !== '$isselected' && 
+    prop !== '$isanswered',
+})(({ theme, $iscorrect, $isselected, $isanswered }) => ({
   width: '100%',
   marginBottom: theme.spacing(2),
   textTransform: 'none',
   fontSize: '1.1rem',
   padding: theme.spacing(1.5),
-  backgroundColor: isanswered
-    ? isselected
-      ? iscorrect
+  backgroundColor: $isanswered
+    ? $isselected
+      ? $iscorrect
         ? '#4caf50'  // Green for correct
         : '#f44336'  // Red for incorrect
-      : iscorrect
+      : $iscorrect
         ? '#4caf50'  // Green for showing correct answer
         : '#fff'     // White for unselected
     : '#fff',        // White for unanswered
-  color: isanswered
-    ? isselected || iscorrect
+  color: $isanswered
+    ? $isselected || $iscorrect
       ? '#fff'
       : '#000'
     : '#000',
   '&:hover': {
-    backgroundColor: isanswered
-      ? isselected
-        ? iscorrect
+    backgroundColor: $isanswered
+      ? $isselected
+        ? $iscorrect
           ? '#45a049'  // Darker green
           : '#d32f2f'  // Darker red
         : '#f5f5f5'    // Light grey
@@ -246,7 +251,7 @@ const QuestionOptions = ({ options, selectedAnswer, onAnswerClick, correctAnswer
 );
 
 function QuizPage() {
-  // Add retries state
+  const navigate = useNavigate();
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 3;
   
@@ -259,61 +264,64 @@ function QuizPage() {
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [isAnswered, setIsAnswered] = useState(false);
   const [correctAnswer, setCorrectAnswer] = useState('');
-  const token = localStorage.getItem('accessToken');
 
   const fetchNextQuestion = async (isRetry = false) => {
     if (!isRetry) {
-      setIsLoading(true);
+      setIsLoading(true); // FIX: Was setLoading
       setError(null);
+      setQuestion(null);
       setFeedback('');
       setSelectedAnswer('');
-      setCorrectAnswer('');  // Reset correct answer
-      setIsAnswered(false);  // Reset answered state
-      setQuestion(null);
+      setIsAnswered(false);
+      setCorrectAnswer('');
     }
     
     try {
-      const response = await fetch(`${BACKEND_URL}/api/quiz/question`, {
+      const token = localStorage.getItem('access_token');
+      console.log("DEBUG: Attempting to fetch question with token:", token);
+      if (!token) {
+        throw new Error("Authentication token not found. Please log in.");
+      }
+
+      const response = await fetch(`/api/quiz/question`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json'
-        }
+          'Content-Type': 'application/json' 
+        },
       });
 
       if (!response.ok) {
-        if (response.status === 500) {
-          if (retryCount < maxRetries) {
-            console.log(`Retry attempt ${retryCount + 1} of ${maxRetries}`);
-            setRetryCount(prev => prev + 1);
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            return fetchNextQuestion(true);
-          }
-          throw new Error('The quiz system is temporarily unavailable. Please try again in a few minutes.');
-        }
         throw new Error(`Unable to fetch question (${response.status}). Please try again.`);
       }
 
       const data = await response.json();
-      setQuestion({
-        video_url: `${BACKEND_URL}${data.video_url}`,
-        options: data.options,
-        question_id: data.question_id  // Store question ID for verification
-      });
-      setTotalQuestions(prev => prev + 1);
+      console.log("DEBUG: Question data received:", data);
+      setQuestion(data);
+      if (!isRetry) {
+        setTotalQuestions(prev => prev + 1);
+      }
       setRetryCount(0);
     } catch (error) {
-      console.error('Quiz error:', error);
-      setError(`${error.message} (Attempt ${retryCount + 1}/${maxRetries})`);
-    } finally {
-      if (!isRetry) {
-        setIsLoading(false);
+      console.error('DEBUG: Error in fetchNextQuestion:', error);
+      setError(error.message);
+      if (error.message.includes("token")) {
+        setTimeout(() => navigate('/login'), 3000);
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchNextQuestion();
-  }, []);
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        setError("You must be logged in to take the quiz. Redirecting...");
+        setIsLoading(false);
+        setTimeout(() => navigate('/login'), 3000);
+    } else {
+        fetchNextQuestion();
+    }
+  }, [navigate]);
 
   const handleAnswerClick = async (option) => {
     if (isAnswered) return;
@@ -321,7 +329,13 @@ function QuizPage() {
     setSelectedAnswer(option);
     
     try {
-      const response = await fetch(`${BACKEND_URL}/api/quiz/verify`, {
+      const token = localStorage.getItem('access_token');
+      console.log("DEBUG: Verifying answer with token:", token);
+      if (!token) {
+        throw new Error("Authentication token not found. Please log in.");
+      }
+
+      const response = await fetch(`/api/quiz/verify`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -334,6 +348,7 @@ function QuizPage() {
       });
 
       const data = await response.json();
+      console.log("DEBUG: Verification response:", data);
       
       if (response.ok) {
         setCorrectAnswer(data.correct_answer);
@@ -346,9 +361,13 @@ function QuizPage() {
         setError(data.error || 'Failed to verify answer');
       }
     } catch (error) {
-      console.error('Error verifying answer:', error);
+      console.error('DEBUG: Error verifying answer:', error);
       setError('Failed to verify answer. Please try again.');
     }
+  };
+
+  const handleNextQuestion = () => {
+    fetchNextQuestion();
   };
 
   return (
@@ -364,23 +383,17 @@ function QuizPage() {
         <LoadingContainer>
           <CircularProgress size={60} thickness={4} />
           <Typography variant="body1" color="textSecondary">
-            {retryCount > 0 
-              ? `Retrying... (Attempt ${retryCount}/${maxRetries})`
-              : 'Loading your quiz question...'}
+            Loading your quiz question...
           </Typography>
         </LoadingContainer>
       ) : error ? (
         <Alert 
           severity="error" 
-          onClose={() => setError(null)}
           action={
             <Button
               color="inherit"
               size="small"
-              onClick={() => {
-                setRetryCount(0);
-                fetchNextQuestion();
-              }}
+              onClick={handleNextQuestion}
             >
               Try Again
             </Button>
@@ -392,7 +405,7 @@ function QuizPage() {
         <QuizCard>
           <QuizHeader>
             <HeaderIcon>
-              <QuizIcon fontSize="inherit" />
+              <QuizIcon fontSize="large" color="inherit" />
             </HeaderIcon>
             <Typography variant="h5" component="div">
               Question {totalQuestions}
@@ -402,6 +415,7 @@ function QuizPage() {
           <VideoContainer>
             {question?.video_url && (
               <video 
+                key={question.video_url}
                 controls 
                 autoPlay 
                 playsInline
@@ -430,23 +444,20 @@ function QuizPage() {
             <FeedbackSection isCorrect={selectedAnswer === correctAnswer}>
               <FeedbackIcon isCorrect={selectedAnswer === correctAnswer}>
                 {selectedAnswer === correctAnswer 
-                  ? <CheckCircleIcon fontSize="inherit" /> 
-                  : <CancelIcon fontSize="inherit" />}
+                  ? <CheckCircleIcon sx={{ fontSize: 40 }} /> 
+                  : <CancelIcon sx={{ fontSize: 40 }} />}
               </FeedbackIcon>
-              <Typography variant="body1" color="textSecondary" paragraph>
+              <Typography variant="h6" component="div" paragraph>
                 {feedback}
               </Typography>
+              <NextButton
+                variant="contained"
+                onClick={handleNextQuestion}
+                startIcon={<PlayArrowIcon />}
+              >
+                Next Question
+              </NextButton>
             </FeedbackSection>
-          )}
-
-          {isAnswered && (
-            <NextButton
-              variant="contained"
-              onClick={fetchNextQuestion}
-              startIcon={<PlayArrowIcon />}
-            >
-              Next Question
-            </NextButton>
           )}
         </QuizCard>
       )}
@@ -457,7 +468,7 @@ function QuizPage() {
           <StatLabel variant="body2">Correct Answers</StatLabel>
         </StatCard>
         <StatCard elevation={0}>
-          <StatNumber variant="h6">{totalQuestions - score}</StatNumber>
+          <StatNumber variant="h6">{totalQuestions > 0 ? totalQuestions - score - (isAnswered ? 0 : 1) : 0}</StatNumber>
           <StatLabel variant="body2">Incorrect Answers</StatLabel>
         </StatCard>
         <StatCard elevation={0}>

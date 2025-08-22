@@ -19,8 +19,6 @@ import DownloadIcon from '@mui/icons-material/Download';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 
-const BACKEND_URL = 'http://127.0.0.1:5000';
-
 // Styled components
 const StyledContainer = styled(Container)(({ theme }) => ({
   padding: theme.spacing(4),
@@ -236,10 +234,10 @@ function TextToSignPage() {
     setError('');
     setVideoUrl('');
 
-    const token = localStorage.getItem('accessToken');
+    const token = localStorage.getItem('access_token');
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/text-to-sign', {
+      const response = await fetch('/api/text-to-sign', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -249,12 +247,10 @@ function TextToSignPage() {
       });
 
       const data = await response.json();
-
-      if (response.ok) {
-        const fullVideoUrl = `${BACKEND_URL}${data.video_url}`;
-        setVideoUrl(fullVideoUrl);
-      } else {
+      if (!response.ok) {
         setError(data.error || 'Failed to generate video.');
+      } else {
+        setVideoUrl(data.video_url);
       }
     } catch (err) {
       setError('Could not connect to the server.');
