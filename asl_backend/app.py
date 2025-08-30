@@ -28,9 +28,9 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['OUTPUT_FOLDER'] = 'outputs'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 # Add placeholders for YouTube API - replace with your actual keys
-app.config['YOUTUBE_API_KEY'] = 'AIzaSyBsa_cUYHiiAzWCwihtmWL8TuRiUSp22nY'
+app.config['YOUTUBE_API_KEY'] = 'xyz'
 app.config['PLAYLIST_ID'] = 'PLMN7QCuj6dfaUwmtdkdKhINGZzyGwp7Q1'
-aai.settings.api_key = "c4b256a029cc4f75aa3cb957842ce756"
+aai.settings.api_key = "xyz"
 
 # --- Global Initializations ---
 db = SQLAlchemy(app)
